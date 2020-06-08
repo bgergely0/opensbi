@@ -7,6 +7,9 @@
 #for more infos, check out /platform/template/config.mk
 
 PLATFORM_RISCV_XLEN = 64
+PLATFORM_RISCV_ABI = lp64
+PLATFORM_RISCV_ISA = rv64ima
+PLATFORM_RISCV_CODE_MODEL = medany
 
 # Blobs to build
 FW_TEXT_START=0x80000000
