@@ -30,7 +30,10 @@ _start:
 	/* Pick one hart to run the main boot sequence */
 	lla	a3, _hart_lottery
 	li	a2, 1
-	amoadd.w a3, a2, (a3)
+        lw      a3, 0(a3)
+        addi    a2, a3, 1
+        sw      a2, 0(a3)
+        li      a2, 1
 	bnez	a3, _start_hang
 
 	/* Save a0 and a1 */

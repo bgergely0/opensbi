@@ -47,6 +47,7 @@
 	.globl _start
 	.globl _start_warm
 _start:
+	csrr a0, CSR_MHARTID
 	/* Find preferred boot HART id */
 	MOV_3R	s0, a0, s1, a1, s2, a2
 	call	fw_boot_hart
@@ -60,8 +61,8 @@ _try_lottery:
 	/* Jump to relocation wait loop if we don't get relocation lottery */
 	lla	a6, _relocate_lottery
 	li	a7, 1
-	amoadd.w a6, a7, (a6)
-	bnez	a6, _wait_relocate_copy_done
+	/*amoadd.w a6, a7, (a6)*/
+	/*bnez	a6, _wait_relocate_copy_done*/
 
 	/* Save load address */
 	lla	t0, _load_start

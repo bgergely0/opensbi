@@ -27,7 +27,7 @@ bool spin_trylock(spinlock_t *lock)
 
 	__asm__ __volatile__(
 		/* Get the current lock counters. */
-		"1:	lr.w.aq	%0, %3\n"
+		"1:	lw	%0, %3\n"
 		"	slli	%2, %0, %6\n"
 		"	and	%2, %2, %5\n"
 		"	and	%1, %0, %5\n"
@@ -35,8 +35,7 @@ bool spin_trylock(spinlock_t *lock)
 		"	bne	%1, %2, 2f\n"
 		"	add	%0, %0, %4\n"
 		/* Acquire the lock. */
-		"	sc.w.rl	%0, %0, %3\n"
-		"	bnez	%0, 1b\n"
+		"	sw	%0, %3\n"
 		"2:"
 		: "=&r"(l0), "=&r"(tmp1), "=&r"(tmp2), "+A"(*lock)
 		: "r"(inc), "r"(mask), "I"(TICKET_SHIFT)
@@ -49,24 +48,26 @@ void spin_lock(spinlock_t *lock)
 {
 	unsigned long inc = 1u << TICKET_SHIFT;
 	unsigned long mask = 0xffffu;
-	u32 l0, tmp1, tmp2;
+	u32 l0, tmp1, tmp2, tmp3;
 
 	__asm__ __volatile__(
 		/* Atomically increment the next ticket. */
-		"	amoadd.w.aqrl	%0, %4, %3\n"
+                "       lw %1, %4\n"
+                "       add %0, %1, %5\n"
+                "       sw %0, %4\n"
 
 		/* Did we get the lock? */
-		"	srli	%1, %0, %6\n"
-		"	and	%1, %1, %5\n"
-		"1:	and	%2, %0, %5\n"
-		"	beq	%1, %2, 2f\n"
+		"	srli	%2, %1, %7\n"
+		"	and	%2, %2, %6\n"
+		"1:	and	%3, %1, %6\n"
+		"	beq	%2, %3, 2f\n"
 
 		/* If not, then spin on the lock. */
-		"	lw	%0, %3\n"
+		"	lw	%1, %4\n"
 		RISCV_ACQUIRE_BARRIER
 		"	j	1b\n"
 		"2:"
-		: "=&r"(l0), "=&r"(tmp1), "=&r"(tmp2), "+A"(*lock)
+		: "=r"(tmp3), "=&r"(l0), "=&r"(tmp1), "=&r"(tmp2), "+A"(*lock)
 		: "r"(inc), "r"(mask), "I"(TICKET_SHIFT)
 		: "memory");
 }
