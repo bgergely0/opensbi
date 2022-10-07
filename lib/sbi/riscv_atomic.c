@@ -28,25 +28,27 @@ void atomic_write(atomic_t *atom, long value)
 long atomic_add_return(atomic_t *atom, long value)
 {
 	long ret;
-
-	__asm__ __volatile__("	amoadd.w.aqrl  %1, %2, %0"
+#if __SIZEOF_LONG__ == 4
+	__asm__ __volatile__("  lw %1, %0\n"
+                             "  add %1, %1, %2\n"
+                             "  sw %1, %0\n"
 			     : "+A"(atom->counter), "=r"(ret)
 			     : "r"(value)
 			     : "memory");
-
-	return ret + value;
+#elif __SIZEOF_LONG__ == 8
+	__asm__ __volatile__("  ld %1, %0\n"
+                             "  add %1, %1, %2\n"
+                             "  sd %1, %0\n"
+			     : "+A"(atom->counter), "=r"(ret)
+			     : "r"(value)
+			     : "memory");
+#endif
+	return ret;
 }
 
 long atomic_sub_return(atomic_t *atom, long value)
 {
-	long ret;
-
-	__asm__ __volatile__("	amoadd.w.aqrl  %1, %2, %0"
-			     : "+A"(atom->counter), "=r"(ret)
-			     : "r"(-value)
-			     : "memory");
-
-	return ret - value;
+	return atomic_add_return(atom, -value);
 }
 
 #define __axchg(ptr, new, size)							\
@@ -90,9 +92,8 @@ long atomic_sub_return(atomic_t *atom, long value)
 		register unsigned int __rc;                               \
 		switch (size) {                                           \
 		case 4:                                                   \
-			__asm__ __volatile__("0:	lr.w %0, %2\n"    \
-					     "	sc.w.rl %1, %z3, %2\n"    \
-					     "	bnez %1, 0b\n"            \
+			__asm__ __volatile__("0:	lw %0, %2\n"    \
+					     "	sw %z3, %2\n"    \
 					     "	fence rw, rw\n"           \
 					     : "=&r"(__ret), "=&r"(__rc), \
 					       "+A"(*__ptr)               \
@@ -100,9 +101,8 @@ long atomic_sub_return(atomic_t *atom, long value)
 					     : "memory");                 \
 			break;                                            \
 		case 8:                                                   \
-			__asm__ __volatile__("0:	lr.d %0, %2\n"    \
-					     "	sc.d.rl %1, %z3, %2\n"    \
-					     "	bnez %1, 0b\n"            \
+			__asm__ __volatile__("0:	ld %0, %2\n"    \
+					     "	sd %z3, %2\n"    \
 					     "	fence rw, rw\n"           \
 					     : "=&r"(__ret), "=&r"(__rc), \
 					       "+A"(*__ptr)               \
@@ -130,10 +130,9 @@ long atomic_sub_return(atomic_t *atom, long value)
 		register unsigned int __rc;                               \
 		switch (size) {                                           \
 		case 4:                                                   \
-			__asm__ __volatile__("0:	lr.w %0, %2\n"    \
+			__asm__ __volatile__("0:	lw %0, %2\n"    \
 					     "	bne  %0, %z3, 1f\n"       \
-					     "	sc.w.rl %1, %z4, %2\n"    \
-					     "	bnez %1, 0b\n"            \
+					     "	sw %z4, %2\n"    \
 					     "	fence rw, rw\n"           \
 					     "1:\n"                       \
 					     : "=&r"(__ret), "=&r"(__rc), \
@@ -142,10 +141,9 @@ long atomic_sub_return(atomic_t *atom, long value)
 					     : "memory");                 \
 			break;                                            \
 		case 8:                                                   \
-			__asm__ __volatile__("0:	lr.d %0, %2\n"    \
+			__asm__ __volatile__("0:	ld %0, %2\n"    \
 					     "	bne %0, %z3, 1f\n"        \
-					     "	sc.d.rl %1, %z4, %2\n"    \
-					     "	bnez %1, 0b\n"            \
+					     "	sd %z4, %2\n"    \
 					     "	fence rw, rw\n"           \
 					     "1:\n"                       \
 					     : "=&r"(__ret), "=&r"(__rc), \
@@ -179,56 +177,46 @@ long atomic_cmpxchg(atomic_t *atom, long oldval, long newval)
 long atomic_xchg(atomic_t *atom, long newval)
 {
 	/* Atomically set new value and return old value. */
-#ifdef __riscv_atomic
-	return axchg(&atom->counter, newval);
-#else
 	return xchg(&atom->counter, newval);
-#endif
 }
 
 unsigned int atomic_raw_xchg_uint(volatile unsigned int *ptr,
 				  unsigned int newval)
 {
 	/* Atomically set new value and return old value. */
-#ifdef __riscv_atomic
-	return axchg(ptr, newval);
-#else
 	return xchg(ptr, newval);
-#endif
 }
 
 unsigned long atomic_raw_xchg_ulong(volatile unsigned long *ptr,
 				    unsigned long newval)
 {
 	/* Atomically set new value and return old value. */
-#ifdef __riscv_atomic
-	return axchg(ptr, newval);
-#else
 	return xchg(ptr, newval);
-#endif
 }
 
 #if (__SIZEOF_POINTER__ == 8)
-#define __AMO(op) "amo" #op ".d"
+#define __AMO(op) #op
 #elif (__SIZEOF_POINTER__ == 4)
-#define __AMO(op) "amo" #op ".w"
+#define __AMO(op) #op "w"
 #else
 #error "Unexpected __SIZEOF_POINTER__"
 #endif
 
-#define __atomic_op_bit_ord(op, mod, nr, addr, ord)                          \
+#define __atomic_op_bit_ord(op, mod, nr, addr)                          \
 	({                                                                   \
-		unsigned long __res, __mask;                                 \
+		unsigned long __res, __mask, __tmp;                          \
 		__mask = BIT_MASK(nr);                                       \
-		__asm__ __volatile__(__AMO(op) #ord " %0, %2, %1"            \
-				     : "=r"(__res), "+A"(addr[BIT_WORD(nr)]) \
+		__asm__ __volatile__(  "  lw %0, %2\n"                       \
+                                       __AMO(op) "  %1, %0, %3\n"            \
+                                       "  sw %1, %2\n"                       \
+				     : "=r"(__res), "=r"(__tmp), "+A"(addr[BIT_WORD(nr)]) \
 				     : "r"(mod(__mask))                      \
 				     : "memory");                            \
 		__res;                                                       \
 	})
 
 #define __atomic_op_bit(op, mod, nr, addr) \
-	__atomic_op_bit_ord(op, mod, nr, addr, .aqrl)
+	__atomic_op_bit_ord(op, mod, nr, addr)
 
 /* Bitmask modifiers */
 #define __NOP(x) (x)

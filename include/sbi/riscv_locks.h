@@ -10,6 +10,10 @@
 #ifndef __RISCV_LOCKS_H__
 #define __RISCV_LOCKS_H__
 
+#include <sbi/sbi_types.h>
+
+#define TICKET_SHIFT	16
+
 typedef struct {
 	volatile long lock;
 } spinlock_t;
